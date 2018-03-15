@@ -91,7 +91,56 @@ def subwindow(img, window, borderType=cv2.BORDER_CONSTANT):
 		res = cv2.copyMakeBorder(res, border[1], border[3], border[0], border[2], borderType)
 	return res
 
+#######################################################################	
+#external call to use KCF tracker
+#initialize tracker state machine
+TRACK_ENABLE = False		
 
+def run_KCF_tracker(box_index: list, frame) -> bool:
+	'''
+		Args:
+			box_index - 2 dimension list. list of detected_objects containing list of indexes
+						[[x1,y1,x2,y2], [x1,y1,x2,y2], ...]
+			frame - current frame/picture recorded
+		Return:
+			True if tracking still running, False if tracker stopped running
+	'''	
+	if not TRACK_ENABLE: #not tracking now, so initialize variables		
+		#initialize tracker when an object is detected
+		if len(box_index) == 1: #if only detect one object
+			#initialize tracker class
+			tracker = kcftracker.KCFTracker(True, False, True)# hog, fixed_window, multi-scale
+			#initialize tracking box
+			width = box_index[0][2] - box_index[0][0]
+			length = box_index[0][3] - box_index[0][1]
+			tracking_box = [box_index[0][0], box_index[0][1], width, length]
+			tracker.init(tracking_box, frame)
+			global TRACK_ENABLE
+			TRACK_ENABLE = True
+		else: #no support for multi-object tracking yet
+			global TRACK_ENABLE
+			TRACK_ENABLE = False 
+		
+	else: #tracking started, need to update
+		#continue to track object
+		tracking_box, tracking_flag = tracker.update(frame) 
+		if tracking_flag: #show box if still tracking
+			show_tracking_box = list(map(int, tracking_box))
+			#draw the box on the image
+			cv2.rectangle(frame, (show_tracking_box[0], show_tracking_box[1]),
+						(show_tracking_box[0] + show_tracking_box[2], 
+						show_tracking_box[1] + show_tracking_box[3]), (0, 255, 255), 1)
+		else: #if not tracking anymore, dont show box
+			global TRACK_ENABLE
+			TRACK_ENABLE = False 
+		
+		#print FPS on image
+		cv2.putText(frame, 'FPS: ' + str(1 / duration)[:4].strip('.'), (8, 20),
+					cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+		
+	#return current tracking state
+	return TRACK_ENABLE
+	
 
 # KCF tracker
 class KCFTracker:
@@ -280,6 +329,9 @@ class KCFTracker:
 		self.train(self._tmpl, 1.0)
 
 	def update(self, image):
+		tracking_ongoing = True #flag to determine if object left the frame yet or not
+		
+		#TODO: need to determine when tracking should stop
 		if(self._roi[0]+self._roi[2] <= 0):  self._roi[0] = -self._roi[2] + 1
 		if(self._roi[1]+self._roi[3] <= 0):  self._roi[1] = -self._roi[2] + 1
 		if(self._roi[0] >= image.shape[1]-1):  self._roi[0] = image.shape[1] - 2
@@ -321,4 +373,4 @@ class KCFTracker:
 		x = self.getFeatures(image, 0, 1.0)
 		self.train(x, self.interp_factor)
 
-		return self._roi
+		return self._roi, tracking_ongoing
